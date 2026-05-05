@@ -64,6 +64,23 @@ ros2 run comm_benchmark bench_b \
 
 ### Example — across two PCs
 
+Both PCs must be in the same DDS domain and use the same RMW
+implementation. The project standard is:
+
+```bash
+# both PCs, every shell:
+export ROS_DOMAIN_ID=15
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp   # or rmw_fastrtps_cpp — same on both sides
+```
+
+If PC B is missing an RMW that PC A has, install the matching package:
+
+```bash
+sudo apt install ros-jazzy-rmw-zenoh-cpp ros-jazzy-rmw-fastrtps-cpp
+```
+
+Then run the harness simultaneously on both sides:
+
 ```bash
 # PC A — leader side
 ros2 run comm_benchmark bench_a \
@@ -76,10 +93,31 @@ ros2 run comm_benchmark bench_b \
     --rate-hz 500 --duration-sec 120 --csv pcb_b1.csv
 ```
 
-For ROS2 transports both PCs need to be in the same DDS domain (set
-`ROS_DOMAIN_ID` identically on both sides) and have a route to each
-other's interfaces (LAN, Tailscale, etc.). For `raw_udp`, just pass
-`--peer-ip` to each side.
+For `raw_udp`, no DDS configuration matters — just pass `--peer-ip` to
+each side with the other PC's reachable IP.
+
+### Determining LAN vs WAN before measurement
+
+Quick assessment from PC A:
+
+```bash
+ping -c 20 <PC_B_IP>     # mean / mdev RTT
+traceroute <PC_B_IP>     # hop count
+ip route get <PC_B_IP>   # gateway path
+ip a                     # local subnet (compare with PC_B_IP / mask)
+```
+
+Decision rule:
+
+| signal | judgement | next step |
+|---|---|---|
+| same `/24` subnet, 1 hop, RTT < 1 ms, mdev < 0.5 ms | true LAN | skip tc netem |
+| different subnet, 2–5 hops, RTT 1–5 ms, mdev < 1 ms | corporate intranet (router-routed but on-prem) | judge per signal — usually still good enough that tc netem is worth running to project to true WAN |
+| 5+ hops or RTT > 10 ms or mdev > 1 ms | WAN-ish | tc netem strongly recommended |
+
+If the corporate network turns out to be true LAN, **the WAN-mitigation
+candidates surveyed in mission 2 become moot** — the candidate list is
+designed for the eventual WAN deployment.
 
 ### Optional WAN emulation (tc netem)
 
@@ -127,6 +165,39 @@ ros2 run comm_benchmark analyze.py /tmp/a.csv /tmp/b.csv
 
 Prints p50 / p90 / p99 / p99.9 / max / mean / stdev RTT in microseconds
 plus the inferred loss count.
+
+### Retrieving PC B's CSV to PC A for analysis
+
+```bash
+# from PC A
+scp <user>@<PC_B_IP>:~/pcb_*.csv /tmp/
+ros2 run comm_benchmark analyze.py /tmp/pca_*.csv /tmp/pcb_*.csv
+```
+
+## Suggested test workflow
+
+1. **Set common env on both PCs**:
+   ```bash
+   export ROS_DOMAIN_ID=15
+   export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+   ```
+2. **Determine LAN vs WAN** (see *Determining LAN vs WAN* above).
+3. **(WAN/intranet only)** apply `tc netem` to a chosen interface on
+    one side.
+4. **Run the three transports back-to-back** on both PCs simultaneously,
+    each for 120 s:
+   ```bash
+   for T in ros2_be ros2_mte raw_udp; do
+       PEER_IP_FLAG=""
+       [ "$T" = "raw_udp" ] && PEER_IP_FLAG="--peer-ip <peer_ip>"
+       ros2 run comm_benchmark bench_a \
+           --transport $T $PEER_IP_FLAG \
+           --rate-hz 500 --duration-sec 120 \
+           --csv pca_${T}.csv
+   done
+   ```
+5. **Tear down `tc netem`** if applied.
+6. **Pull PC B's CSVs to PC A** with `scp` and run `analyze.py`.
 
 ## Comparing candidates — workflow
 
