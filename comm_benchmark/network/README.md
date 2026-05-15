@@ -20,6 +20,31 @@ PC a (10.42.0.141)
 - b: `10.99.0.1/30`
 - c: `10.99.0.2/30`
 
+## TL;DR — `setup_wg.sh` 한 파일로 (권장)
+
+PC당 2번 실행, 총 4 명령. 키 생성/설치/적용 다 묶여있음.
+
+```bash
+# PC b (1차)
+bash setup_wg.sh b
+# → 화면에 b 의 pubkey 출력. 복사.
+
+# PC c (1차)
+bash setup_wg.sh c
+# → 화면에 c 의 pubkey 출력. 복사.
+
+# PC b (2차) — c 의 pubkey 인자로
+bash setup_wg.sh b <c-pubkey>
+
+# PC c (2차) — b 의 pubkey 인자로
+bash setup_wg.sh c <b-pubkey>
+```
+
+각 2차 실행이 conf 작성 + `wg-quick up wg0` + `wg show` 까지 자동.
+`latest handshake: ... seconds ago` 보이면 성공.
+
+아래는 수동으로 가고 싶을 때의 디테일.
+
 ## 사전 준비 (PC b, c 각각)
 
 ```bash

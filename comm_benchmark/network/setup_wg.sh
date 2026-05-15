@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# setup_wg.sh — all-in-one WireGuard b↔c tunnel for comm_benchmark.
+#
+# Usage flow (4 commands total, 2 per PC):
+#
+#   PC b:   bash setup_wg.sh b                 # install + genkey + print b_pub
+#   PC c:   bash setup_wg.sh c                 # install + genkey + print c_pub
+#   PC b:   bash setup_wg.sh b <c_pub>         # write conf, bring up, verify
+#   PC c:   bash setup_wg.sh c <b_pub>         # write conf, bring up, verify
+#
+# Idempotent — re-runnable. Keys aren't regenerated if already present.
+
+set -e
+
+HOST="${1:-}"
+PEER_PUB="${2:-}"
+
+case "$HOST" in
+  b)
+    SELF_IP=10.99.0.1
+    PEER_IP=10.99.0.2
+    PEER_NET=10.42.2.0/24
+    SHARED_IFACE=enx9cebe8ce7665
+    PEER_ENDPOINT="12.56.52.76:51820"   # c's corp IP, b initiates
+    OTHER=c
+    ;;
+  c)
+    SELF_IP=10.99.0.2
+    PEER_IP=10.99.0.1
+    PEER_NET=10.42.0.0/24
+    SHARED_IFACE=enx9cebe8606e07
+    PEER_ENDPOINT=""                     # c does not initiate (b's corp-IP unreachable from c)
+    OTHER=b
+    ;;
+  *)
+    echo "Usage:" >&2
+    echo "  bash $0 b|c                        # init: install + keygen + print own pubkey" >&2
+    echo "  bash $0 b|c <peer-pubkey>          # apply: write conf, up wg0, show status" >&2
+    exit 1
+    ;;
+esac
+
+PRIV=/etc/wireguard/${HOST}_priv
+PUB=/etc/wireguard/${HOST}_pub
+CONF=/etc/wireguard/wg0.conf
+
+# ---------------------------------------------------------------------------
+# Always ensure install + keys present (idempotent)
+# ---------------------------------------------------------------------------
+if ! command -v wg >/dev/null 2>&1; then
+  echo ">>> Installing wireguard-tools…"
+  sudo apt update -qq && sudo apt install -y wireguard
+fi
+
+sudo mkdir -p /etc/wireguard
+sudo chmod 700 /etc/wireguard
+
+if [[ ! -s "$PRIV" || ! -s "$PUB" ]]; then
+  echo ">>> Generating keypair at $PRIV / $PUB"
+  sudo sh -c "wg genkey | tee '$PRIV' | wg pubkey > '$PUB'"
+  sudo chmod 600 "$PRIV"
+fi
+
+PUB_VAL=$(sudo cat "$PUB")
+PUB_LEN=$(echo -n "$PUB_VAL" | wc -c)
+
+# ---------------------------------------------------------------------------
+# INIT mode (no peer pubkey provided) — print own pubkey and exit
+# ---------------------------------------------------------------------------
+if [[ -z "$PEER_PUB" ]]; then
+  echo
+  echo "=========================================================="
+  echo "  PC $HOST pubkey  (length: $PUB_LEN — must be 44):"
+  echo
+  echo "    $PUB_VAL"
+  echo
+  echo "  Now on PC $OTHER, run:"
+  echo "    bash $0 $OTHER                   # to get $OTHER pubkey"
+  echo
+  echo "  Then come back to PC $HOST and run:"
+  echo "    bash $0 $HOST <$OTHER-pubkey>    # to apply"
+  echo "=========================================================="
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# APPLY mode — validate peer pubkey then write conf and bring up
+# ---------------------------------------------------------------------------
+PEER_LEN=$(echo -n "$PEER_PUB" | wc -c)
+if [[ "$PEER_LEN" -ne 44 ]]; then
+  echo "ERROR: peer pubkey length is $PEER_LEN, expected 44." >&2
+  echo "       Got: $PEER_PUB" >&2
+  echo "       Re-copy the entire line printed by 'bash $0 $OTHER' on PC $OTHER" >&2
+  echo "       (must end with '=')." >&2
+  exit 1
+fi
+
+PRIV_VAL=$(sudo cat "$PRIV")
+
+# Take down existing wg0 if any (idempotent re-run)
+sudo wg-quick down wg0 2>/dev/null || true
+
+if [[ -n "$PEER_ENDPOINT" ]]; then
+  ENDPOINT_LINE="Endpoint = $PEER_ENDPOINT"
+else
+  ENDPOINT_LINE="# (no Endpoint — peer initiates and conntrack tracks the path back)"
+fi
+
+sudo tee "$CONF" > /dev/null <<EOF
+[Interface]
+PrivateKey = $PRIV_VAL
+Address = $SELF_IP/30
+ListenPort = 51820
+PostUp   = ip route add $PEER_NET via $PEER_IP dev %i; iptables -I FORWARD -i %i -o $SHARED_IFACE -j ACCEPT; iptables -I FORWARD -i $SHARED_IFACE -o %i -j ACCEPT
+PostDown = ip route del $PEER_NET via $PEER_IP dev %i 2>/dev/null; iptables -D FORWARD -i %i -o $SHARED_IFACE -j ACCEPT 2>/dev/null; iptables -D FORWARD -i $SHARED_IFACE -o %i -j ACCEPT 2>/dev/null
+
+[Peer]
+PublicKey = $PEER_PUB
+$ENDPOINT_LINE
+AllowedIPs = $PEER_NET, $PEER_IP/32
+PersistentKeepalive = 25
+EOF
+sudo chmod 600 "$CONF"
+
+sudo wg-quick up wg0
+
+echo
+echo "=== wg show wg0 ==="
+sudo wg show wg0
+echo
+echo "Wait ~30s, then re-run 'sudo wg show wg0' and look for:"
+echo "  latest handshake: <N seconds ago>"
+echo "  transfer: <some bytes>"
+echo
+echo "If 'latest handshake' never appears:"
+echo "  - peer pubkey was wrong, or"
+echo "  - corp blocks UDP/51820 (try ListenPort = 443 in $CONF and re-up)"
