@@ -17,6 +17,7 @@
 #include "comm_benchmark/transports/raw_udp.hpp"
 #include "comm_benchmark/transports/ros2_be.hpp"
 #include "comm_benchmark/transports/ros2_mte.hpp"
+#include "comm_benchmark/transports/zenoh_p2p.hpp"
 
 namespace comm_benchmark {
 
@@ -70,6 +71,17 @@ int run(const CliConfig& c) {
       cfg.sndbuf_bytes = c.sndbuf_bytes;
       cfg.busy_poll    = c.busy_poll;
       tx = std::make_unique<RawUdpTransport>(cfg);
+      break;
+    }
+    case TransportKind::ZenohP2p: {
+      ZenohP2pTransport::Config cfg;
+      cfg.node_name   = node_name;
+      cfg.out_topic   = my_topic;
+      cfg.in_topic    = peer_topic;
+      cfg.peer_ip     = c.peer_ip;
+      cfg.zenoh_port  = c.zenoh_port;
+      tx = std::make_unique<ZenohP2pTransport>(cfg);
+      needs_ros = true;
       break;
     }
   }

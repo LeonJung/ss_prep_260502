@@ -17,6 +17,7 @@ IRQ pinning, etc.) are listed under TODO at the bottom.
 | **B1** | `ros2_be`  | rclcpp + BEST_EFFORT QoS + KEEP_LAST 1 + VOLATILE durability, default SingleThreadedExecutor |
 | **B6** | `ros2_mte` | same QoS + MultiThreadedExecutor + dedicated Reentrant callback group for the recv subscription, optional SCHED_FIFO on the executor worker |
 | **E1** | `raw_udp`  | bare AF_INET / SOCK_DGRAM. struct memcpy on the wire, no RTPS, no discovery, optional SO_BUSY_POLL / SO_RCVBUF / SO_SNDBUF / SCHED_FIFO |
+| **B7** | `zenoh_p2p`| same rclcpp+QoS as B1, but Zenoh session forced into **peer mode** (no central `rmw_zenohd` router). Both sides know each other's IP via `--peer-ip`, multicast scouting disabled. Requires `RMW_IMPLEMENTATION=rmw_zenoh_cpp`. |
 
 The on-wire payload is exactly **1024 B** for every transport (24 B
 measurement header + 144 B q/qd/tau_ext + 856 B padding). The
@@ -40,12 +41,13 @@ single-machine sanity check).
 
 ```text
 usage: bench_{a,b}
-       --transport ros2_be|ros2_mte|raw_udp
+       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p
        [--rate-hz 500] [--duration-sec 120] [--csv path]
        [--rt-priority 0]
        (raw_udp only) --peer-ip IP [--local-port P] [--peer-port P]
                       [--rcvbuf BYTES] [--sndbuf BYTES] [--busy-poll]
        (ros2_mte only) [--num-threads 2]
+       (zenoh_p2p only) --peer-ip IP [--zenoh-port 7447]
 ```
 
 ### Example — same-host loopback sanity check
@@ -61,6 +63,29 @@ ros2 run comm_benchmark bench_b \
     --transport raw_udp --peer-ip 127.0.0.1 --local-port 18001 --peer-port 18000 \
     --rate-hz 500 --duration-sec 30 --csv /tmp/b.csv
 ```
+
+### Example — Zenoh peer-mode (P2P, no router)
+
+```bash
+# Both PCs first:
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ROS_DOMAIN_ID=15
+
+# PC a
+ros2 run comm_benchmark bench_a \
+    --transport zenoh_p2p --peer-ip 10.42.2.110 \
+    --rate-hz 500 --duration-sec 30 --csv /tmp/a_p2p.csv
+
+# PC d
+ros2 run comm_benchmark bench_b \
+    --transport zenoh_p2p --peer-ip 10.42.0.141 \
+    --rate-hz 500 --duration-sec 30 --csv /tmp/d_p2p.csv
+```
+
+vs the default `ros2_be` (Zenoh client mode + bundled `rmw_zenohd` router):
+the P2P variant should remove one router hop's worth of latency. TCP/7447 must
+be open between the two PCs (see `network/setup_wg.sh` for the WG tunnel
+that already covers this in the comm_benchmark mission).
 
 ### Example — across two PCs
 
