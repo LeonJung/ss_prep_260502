@@ -87,6 +87,26 @@ the P2P variant should remove one router hop's worth of latency. TCP/7447 must
 be open between the two PCs (see `network/setup_wg.sh` for the WG tunnel
 that already covers this in the comm_benchmark mission).
 
+### Single-shot runner — `scripts/bench_one.sh`
+
+For interactive A/B (no for-loop matrix), useful in clean LAN setups
+(e.g. **PC e ↔ switching hub ↔ PC f**) where you want to A/B individual
+transports one at a time.
+
+```bash
+# PC e (peer = PC f at 192.168.1.11)
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh a zenoh_p2p 192.168.1.11
+
+# PC f (peer = PC e at 192.168.1.10)
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh b zenoh_p2p 192.168.1.10
+```
+
+Args: `<a|b> <ros2_be|ros2_mte|raw_udp|zenoh_p2p> <peer-ip> [duration_sec] [csv_path]`.
+Defaults: 30 s, `~/bench_<role>_<transport>.csv`. Auto-applies the right
+ports for `raw_udp` and `--peer-ip` for `zenoh_p2p`. Exports
+`ROS_DOMAIN_ID=15` and `RMW_IMPLEMENTATION=rmw_zenoh_cpp` unless caller
+already set them.
+
 ### Example — across two PCs
 
 Both PCs must be in the same DDS domain and use the same RMW
