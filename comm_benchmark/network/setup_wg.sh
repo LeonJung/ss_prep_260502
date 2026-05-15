@@ -100,6 +100,11 @@ PRIV_VAL=$(sudo cat "$PRIV")
 # Take down existing wg0 if any (idempotent re-run)
 sudo wg-quick down wg0 2>/dev/null || true
 
+# Clean up leftover GRE artifacts from earlier attempts (won't fail if absent)
+sudo ip link set gre1 down 2>/dev/null || true
+sudo ip tunnel del gre1   2>/dev/null || true
+sudo ip route del "$PEER_NET" 2>/dev/null || true
+
 if [[ -n "$PEER_ENDPOINT" ]]; then
   ENDPOINT_LINE="Endpoint = $PEER_ENDPOINT"
 else
@@ -111,7 +116,7 @@ sudo tee "$CONF" > /dev/null <<EOF
 PrivateKey = $PRIV_VAL
 Address = $SELF_IP/30
 ListenPort = 51820
-PostUp   = ip route add $PEER_NET via $PEER_IP dev %i; iptables -I FORWARD -i %i -o $SHARED_IFACE -j ACCEPT; iptables -I FORWARD -i $SHARED_IFACE -o %i -j ACCEPT
+PostUp   = ip route replace $PEER_NET via $PEER_IP dev %i; iptables -C FORWARD -i %i -o $SHARED_IFACE -j ACCEPT 2>/dev/null || iptables -I FORWARD -i %i -o $SHARED_IFACE -j ACCEPT; iptables -C FORWARD -i $SHARED_IFACE -o %i -j ACCEPT 2>/dev/null || iptables -I FORWARD -i $SHARED_IFACE -o %i -j ACCEPT
 PostDown = ip route del $PEER_NET via $PEER_IP dev %i 2>/dev/null; iptables -D FORWARD -i %i -o $SHARED_IFACE -j ACCEPT 2>/dev/null; iptables -D FORWARD -i $SHARED_IFACE -o %i -j ACCEPT 2>/dev/null
 
 [Peer]
