@@ -12,8 +12,13 @@ namespace comm_benchmark {
 namespace {
 
 // Write a Fast DDS XML profile to /tmp that:
-//   - disables multicast metatraffic (empty multicast list)
 //   - binds metatraffic unicast on 0.0.0.0 (auto port assignment)
+//   - OMITS metatrafficMulticastLocatorList entirely — per Fast DDS
+//     rules, when metatrafficUnicastLocatorList is non-empty and the
+//     multicast element is *absent* (not "empty"), multicast metatraffic
+//     discovery is disabled. The empty-tag form `<list></list>` makes
+//     the XML parser emit "node ... without content" — that's why this
+//     element is missing on purpose.
 //   - registers `peer_ip` in initialPeersList so the participant
 //     contacts the peer at startup
 // Returns the absolute path so callers can export
@@ -37,8 +42,6 @@ std::string write_fastdds_unicast_profile(const std::string& peer_ip) {
       << "            </udpv4>\n"
       << "          </locator>\n"
       << "        </metatrafficUnicastLocatorList>\n"
-      << "        <metatrafficMulticastLocatorList>\n"
-      << "        </metatrafficMulticastLocatorList>\n"
       << "        <initialPeersList>\n"
       << "          <locator>\n"
       << "            <udpv4>\n"
