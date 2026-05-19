@@ -33,6 +33,7 @@ add_library(bench_core STATIC
   src/transports/ros2_be.cpp
   src/transports/ros2_mte.cpp
   src/transports/zenoh_p2p.cpp
+  src/transports/zenoh_router.cpp
 )
 target_include_directories(bench_core PUBLIC include)
 ament_target_dependencies(bench_core rclcpp std_msgs)

@@ -6,24 +6,31 @@
 # transports interactively rather than batch a full matrix.
 #
 # Usage:
-#   bash bench_one.sh <role> <transport> <peer-ip> [duration_sec] [csv_path]
+#   bash bench_one.sh <role> <transport> <peer-or-router-ip> [duration_sec] [csv_path]
 #
-#   role        : a | b      (default ports for raw_udp picked accordingly)
-#   transport   : ros2_be | ros2_mte | raw_udp | zenoh_p2p
-#   peer-ip     : peer's IP (the OTHER PC's address on the shared switch)
-#   duration    : optional, default 30
-#   csv_path    : optional, default ~/bench_<role>_<transport>.csv
+#   role               : a | b      (default ports for raw_udp picked accordingly)
+#   transport          : ros2_be | ros2_mte | raw_udp | zenoh_p2p | zenoh_router
+#   peer-or-router-ip  : for raw_udp / zenoh_p2p : peer's IP
+#                        for zenoh_router       : host running rmw_zenohd
+#                        for ros2_be / ros2_mte : ignored (pass any token)
+#   duration           : optional, default 30
+#   csv_path           : optional, default ~/bench_<role>_<transport>.csv
 #
 # Examples (PC e at 192.168.1.10, PC f at 192.168.1.11):
 #
-#   # PC e
+#   # PC e — Zenoh peer mode (no router)
 #   bash bench_one.sh a zenoh_p2p 192.168.1.11
-#
 #   # PC f
 #   bash bench_one.sh b zenoh_p2p 192.168.1.10
 #
+#   # PC e — Zenoh client mode (requires `rmw_zenohd` running, e.g. on PC e itself)
+#   #   On PC e (separate shell, BEFORE running bench):
+#   #     RMW_IMPLEMENTATION=rmw_zenoh_cpp ros2 run rmw_zenoh_cpp rmw_zenohd
+#   bash bench_one.sh a zenoh_router 192.168.1.10        # PC e (router = self)
+#   bash bench_one.sh b zenoh_router 192.168.1.10        # PC f (router = PC e)
+#
 # For raw_udp, default ports:  A binds 18000 → B:18001, B binds 18001 → A:18000
-# For zenoh_p2p,            both sides listen on TCP/7447
+# For zenoh_p2p / zenoh_router, both sides use TCP/7447
 
 set -e
 
@@ -34,12 +41,12 @@ DURATION="${4:-30}"
 CSV="${5:-$HOME/bench_${ROLE}_${TRANSPORT}.csv}"
 
 if [[ -z "$ROLE" || -z "$TRANSPORT" || -z "$PEER_IP" ]]; then
-  echo "Usage: $0 <a|b> <ros2_be|ros2_mte|raw_udp|zenoh_p2p> <peer-ip> [duration] [csv]" >&2
+  echo "Usage: $0 <a|b> <ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router> <peer-or-router-ip> [duration] [csv]" >&2
   exit 1
 fi
 case "$ROLE" in a|b) ;; *) echo "role must be a or b" >&2; exit 1 ;; esac
 case "$TRANSPORT" in
-  ros2_be|ros2_mte|raw_udp|zenoh_p2p) ;;
+  ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router) ;;
   *) echo "unknown transport: $TRANSPORT" >&2; exit 1 ;;
 esac
 
@@ -59,6 +66,15 @@ case "$TRANSPORT" in
     ;;
   zenoh_p2p)
     EXTRA="--peer-ip $PEER_IP"
+    ;;
+  zenoh_router)
+    EXTRA="--router-ip $PEER_IP"
+    if ! pgrep -af rmw_zenohd >/dev/null; then
+      echo ">>> WARNING: rmw_zenohd not detected on this host." >&2
+      echo ">>>          If the router is on a DIFFERENT host ($PEER_IP), this is fine — make sure it's running there." >&2
+      echo ">>>          If the router was supposed to be on this host, start it first:" >&2
+      echo ">>>            RMW_IMPLEMENTATION=rmw_zenoh_cpp ros2 run rmw_zenoh_cpp rmw_zenohd" >&2
+    fi
     ;;
   *)
     EXTRA=""

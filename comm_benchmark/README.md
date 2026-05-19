@@ -18,6 +18,7 @@ IRQ pinning, etc.) are listed under TODO at the bottom.
 | **B6** | `ros2_mte` | same QoS + MultiThreadedExecutor + dedicated Reentrant callback group for the recv subscription, optional SCHED_FIFO on the executor worker |
 | **E1** | `raw_udp`  | bare AF_INET / SOCK_DGRAM. struct memcpy on the wire, no RTPS, no discovery, optional SO_BUSY_POLL / SO_RCVBUF / SO_SNDBUF / SCHED_FIFO |
 | **B7** | `zenoh_p2p`| same rclcpp+QoS as B1, but Zenoh session forced into **peer mode** (no central `rmw_zenohd` router). Both sides know each other's IP via `--peer-ip`, multicast scouting disabled. Requires `RMW_IMPLEMENTATION=rmw_zenoh_cpp`. |
+| **B8** | `zenoh_router` | same rclcpp+QoS as B1, but Zenoh session forced into **client mode** with explicit `--router-ip` pointing at a `rmw_zenohd` daemon. Operator must start `rmw_zenohd` separately. Scouting disabled. This is the explicit "canonical" rmw_zenoh router baseline used to quantify router-hop cost vs `zenoh_p2p`. Requires `RMW_IMPLEMENTATION=rmw_zenoh_cpp`. |
 
 The on-wire payload is exactly **1024 B** for every transport (24 B
 measurement header + 144 B q/qd/tau_ext + 856 B padding). The
@@ -41,13 +42,15 @@ single-machine sanity check).
 
 ```text
 usage: bench_{a,b}
-       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p
+       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router
        [--rate-hz 500] [--duration-sec 120] [--csv path]
        [--rt-priority 0]
        (raw_udp only) --peer-ip IP [--local-port P] [--peer-port P]
                       [--rcvbuf BYTES] [--sndbuf BYTES] [--busy-poll]
        (ros2_mte only) [--num-threads 2]
        (zenoh_p2p only) --peer-ip IP [--zenoh-port 7447]
+       (zenoh_router only) --router-ip IP [--zenoh-port 7447]
+                          (operator must start rmw_zenohd separately)
 ```
 
 ### Example — same-host loopback sanity check
@@ -87,6 +90,36 @@ the P2P variant should remove one router hop's worth of latency. TCP/7447 must
 be open between the two PCs (see `network/setup_wg.sh` for the WG tunnel
 that already covers this in the comm_benchmark mission).
 
+### Example — Zenoh router mode (canonical client + rmw_zenohd)
+
+The explicit "router baseline" for comparison against `zenoh_p2p` — pins
+the session to client mode with a known `rmw_zenohd` endpoint, no
+multicast/gossip discovery. The operator starts `rmw_zenohd` themselves
+on the router host (usually one of the two PCs, often A).
+
+```bash
+# Both PCs first:
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ROS_DOMAIN_ID=15
+
+# PC a (also acts as router host)
+ros2 run rmw_zenoh_cpp rmw_zenohd                      # leave running
+
+# PC a — bench, connecting to local rmw_zenohd
+ros2 run comm_benchmark bench_a \
+    --transport zenoh_router --router-ip 127.0.0.1 \
+    --rate-hz 500 --duration-sec 30 --csv /tmp/a_router.csv
+
+# PC d — bench, connecting to PC a's rmw_zenohd
+ros2 run comm_benchmark bench_b \
+    --transport zenoh_router --router-ip 10.42.0.141 \
+    --rate-hz 500 --duration-sec 30 --csv /tmp/d_router.csv
+```
+
+Diff vs `zenoh_p2p`: traffic goes bench_a → rmw_zenohd → bench_b
+(two hops at the Zenoh layer instead of one). Use as the "before"
+number when judging if `zenoh_p2p` actually wins.
+
 ### Single-shot runner — `scripts/bench_one.sh`
 
 For interactive A/B (no for-loop matrix), useful in clean LAN setups
@@ -101,11 +134,13 @@ bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh a zenoh_p2p 192.168.1.1
 bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh b zenoh_p2p 192.168.1.10
 ```
 
-Args: `<a|b> <ros2_be|ros2_mte|raw_udp|zenoh_p2p> <peer-ip> [duration_sec] [csv_path]`.
+Args: `<a|b> <ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router> <peer-or-router-ip> [duration_sec] [csv_path]`.
 Defaults: 30 s, `~/bench_<role>_<transport>.csv`. Auto-applies the right
-ports for `raw_udp` and `--peer-ip` for `zenoh_p2p`. Exports
-`ROS_DOMAIN_ID=15` and `RMW_IMPLEMENTATION=rmw_zenoh_cpp` unless caller
-already set them.
+ports for `raw_udp`, `--peer-ip` for `zenoh_p2p`, and `--router-ip` for
+`zenoh_router`. For `zenoh_router`, prints a warning if `rmw_zenohd` is
+not running on this host (harmless if the router is on the other host).
+Exports `ROS_DOMAIN_ID=15` and `RMW_IMPLEMENTATION=rmw_zenoh_cpp` unless
+caller already set them.
 
 ### Example — across two PCs
 

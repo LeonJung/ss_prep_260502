@@ -16,14 +16,17 @@ bool starts_with(const char* s, const char* p) {
 void usage(const char* prog) {
   std::cerr <<
     "usage: " << prog << " [--role a|b]\n"
-    "       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p\n"
+    "       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router\n"
     "       [--rate-hz 500] [--duration-sec 120] [--csv path]\n"
     "       [--rt-priority 0]\n"
     "       (raw_udp only) --peer-ip IP [--local-port P] [--peer-port P]\n"
     "                      [--rcvbuf BYTES] [--sndbuf BYTES] [--busy-poll]\n"
     "       (ros2_mte only) [--num-threads 2]\n"
     "       (zenoh_p2p only) --peer-ip IP [--zenoh-port 7447]\n"
-    "                       (requires RMW_IMPLEMENTATION=rmw_zenoh_cpp)\n";
+    "                       (requires RMW_IMPLEMENTATION=rmw_zenoh_cpp)\n"
+    "       (zenoh_router only) --router-ip IP [--zenoh-port 7447]\n"
+    "                          (requires RMW_IMPLEMENTATION=rmw_zenoh_cpp,\n"
+    "                           operator must start rmw_zenohd separately)\n";
 }
 
 }  // namespace
@@ -34,6 +37,7 @@ const char* transport_name(TransportKind t) {
     case TransportKind::Ros2Mte: return "ros2_mte";
     case TransportKind::RawUdp: return "raw_udp";
     case TransportKind::ZenohP2p: return "zenoh_p2p";
+    case TransportKind::ZenohRouter: return "zenoh_router";
   }
   return "?";
 }
@@ -71,6 +75,7 @@ CliConfig parse_cli(int argc, char** argv) {
       else if (!std::strcmp(v, "ros2_mte")) c.transport = TransportKind::Ros2Mte;
       else if (!std::strcmp(v, "raw_udp"))  c.transport = TransportKind::RawUdp;
       else if (!std::strcmp(v, "zenoh_p2p")) c.transport = TransportKind::ZenohP2p;
+      else if (!std::strcmp(v, "zenoh_router")) c.transport = TransportKind::ZenohRouter;
       else throw std::runtime_error("unknown transport: " + std::string(v));
     } else if (!std::strcmp(a, "--rate-hz")) {
       c.rate_hz = std::stod(need(1));
@@ -96,6 +101,8 @@ CliConfig parse_cli(int argc, char** argv) {
       c.num_threads = std::stoi(need(1));
     } else if (!std::strcmp(a, "--zenoh-port")) {
       c.zenoh_port = static_cast<uint16_t>(std::stoi(need(1)));
+    } else if (!std::strcmp(a, "--router-ip")) {
+      c.router_ip = need(1);
     } else if (!std::strcmp(a, "-h") || !std::strcmp(a, "--help")) {
       usage(argv[0]);
       std::exit(0);
@@ -108,6 +115,10 @@ CliConfig parse_cli(int argc, char** argv) {
   }
   if (c.transport == TransportKind::ZenohP2p && c.peer_ip.empty()) {
     throw std::runtime_error("--peer-ip is required for zenoh_p2p");
+  }
+  if (c.transport == TransportKind::ZenohRouter && c.router_ip.empty()) {
+    throw std::runtime_error("--router-ip is required for zenoh_router "
+                             "(host running rmw_zenohd)");
   }
   // Default ports per role: A binds 18000 → B:18001, B binds 18001 → A:18000.
   if (c.transport == TransportKind::RawUdp) {

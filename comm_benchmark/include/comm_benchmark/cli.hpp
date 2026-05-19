@@ -6,7 +6,7 @@
 namespace comm_benchmark {
 
 enum class Role { A, B };
-enum class TransportKind { Ros2Be, Ros2Mte, RawUdp, ZenohP2p };
+enum class TransportKind { Ros2Be, Ros2Mte, RawUdp, ZenohP2p, ZenohRouter };
 
 struct CliConfig {
   Role role{Role::A};
@@ -26,8 +26,11 @@ struct CliConfig {
   // ros2_mte only:
   int num_threads{2};
 
-  // zenoh_p2p only:
+  // zenoh_p2p / zenoh_router:
   uint16_t zenoh_port{7447};
+
+  // zenoh_router only:
+  std::string router_ip;
 
   // shared:
   int rt_priority{0};

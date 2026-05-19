@@ -18,6 +18,7 @@
 #include "comm_benchmark/transports/ros2_be.hpp"
 #include "comm_benchmark/transports/ros2_mte.hpp"
 #include "comm_benchmark/transports/zenoh_p2p.hpp"
+#include "comm_benchmark/transports/zenoh_router.hpp"
 
 namespace comm_benchmark {
 
@@ -81,6 +82,17 @@ int run(const CliConfig& c) {
       cfg.peer_ip     = c.peer_ip;
       cfg.zenoh_port  = c.zenoh_port;
       tx = std::make_unique<ZenohP2pTransport>(cfg);
+      needs_ros = true;
+      break;
+    }
+    case TransportKind::ZenohRouter: {
+      ZenohRouterTransport::Config cfg;
+      cfg.node_name   = node_name;
+      cfg.out_topic   = my_topic;
+      cfg.in_topic    = peer_topic;
+      cfg.router_ip   = c.router_ip;
+      cfg.zenoh_port  = c.zenoh_port;
+      tx = std::make_unique<ZenohRouterTransport>(cfg);
       needs_ros = true;
       break;
     }
