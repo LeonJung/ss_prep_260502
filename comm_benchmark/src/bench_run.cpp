@@ -19,6 +19,7 @@
 #include "comm_benchmark/transports/ros2_mte.hpp"
 #include "comm_benchmark/transports/zenoh_p2p.hpp"
 #include "comm_benchmark/transports/zenoh_router.hpp"
+#include "comm_benchmark/transports/dds_unicast.hpp"
 
 namespace comm_benchmark {
 
@@ -93,6 +94,16 @@ int run(const CliConfig& c) {
       cfg.router_ip   = c.router_ip;
       cfg.zenoh_port  = c.zenoh_port;
       tx = std::make_unique<ZenohRouterTransport>(cfg);
+      needs_ros = true;
+      break;
+    }
+    case TransportKind::DdsUnicast: {
+      DdsUnicastTransport::Config cfg;
+      cfg.node_name   = node_name;
+      cfg.out_topic   = my_topic;
+      cfg.in_topic    = peer_topic;
+      cfg.peer_ip     = c.peer_ip;
+      tx = std::make_unique<DdsUnicastTransport>(cfg);
       needs_ros = true;
       break;
     }

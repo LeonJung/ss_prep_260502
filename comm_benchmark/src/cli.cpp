@@ -16,7 +16,7 @@ bool starts_with(const char* s, const char* p) {
 void usage(const char* prog) {
   std::cerr <<
     "usage: " << prog << " [--role a|b]\n"
-    "       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router\n"
+    "       --transport ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router|dds_unicast\n"
     "       [--rate-hz 500] [--duration-sec 120] [--csv path]\n"
     "       [--rt-priority 0]\n"
     "       (raw_udp only) --peer-ip IP [--local-port P] [--peer-port P]\n"
@@ -26,7 +26,10 @@ void usage(const char* prog) {
     "                       (requires RMW_IMPLEMENTATION=rmw_zenoh_cpp)\n"
     "       (zenoh_router only) --router-ip IP [--zenoh-port 7447]\n"
     "                          (requires RMW_IMPLEMENTATION=rmw_zenoh_cpp,\n"
-    "                           operator must start rmw_zenohd separately)\n";
+    "                           operator must start rmw_zenohd separately)\n"
+    "       (dds_unicast only) --peer-ip IP\n"
+    "                          (requires RMW_IMPLEMENTATION=rmw_fastrtps_cpp,\n"
+    "                           XML profile forcing unicast + no mcast discovery)\n";
 }
 
 }  // namespace
@@ -38,6 +41,7 @@ const char* transport_name(TransportKind t) {
     case TransportKind::RawUdp: return "raw_udp";
     case TransportKind::ZenohP2p: return "zenoh_p2p";
     case TransportKind::ZenohRouter: return "zenoh_router";
+    case TransportKind::DdsUnicast: return "dds_unicast";
   }
   return "?";
 }
@@ -76,6 +80,7 @@ CliConfig parse_cli(int argc, char** argv) {
       else if (!std::strcmp(v, "raw_udp"))  c.transport = TransportKind::RawUdp;
       else if (!std::strcmp(v, "zenoh_p2p")) c.transport = TransportKind::ZenohP2p;
       else if (!std::strcmp(v, "zenoh_router")) c.transport = TransportKind::ZenohRouter;
+      else if (!std::strcmp(v, "dds_unicast")) c.transport = TransportKind::DdsUnicast;
       else throw std::runtime_error("unknown transport: " + std::string(v));
     } else if (!std::strcmp(a, "--rate-hz")) {
       c.rate_hz = std::stod(need(1));
@@ -119,6 +124,10 @@ CliConfig parse_cli(int argc, char** argv) {
   if (c.transport == TransportKind::ZenohRouter && c.router_ip.empty()) {
     throw std::runtime_error("--router-ip is required for zenoh_router "
                              "(host running rmw_zenohd)");
+  }
+  if (c.transport == TransportKind::DdsUnicast && c.peer_ip.empty()) {
+    throw std::runtime_error("--peer-ip is required for dds_unicast "
+                             "(peer's IP for initialPeersList)");
   }
   // Default ports per role: A binds 18000 → B:18001, B binds 18001 → A:18000.
   if (c.transport == TransportKind::RawUdp) {

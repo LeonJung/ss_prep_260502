@@ -6,7 +6,7 @@
 namespace comm_benchmark {
 
 enum class Role { A, B };
-enum class TransportKind { Ros2Be, Ros2Mte, RawUdp, ZenohP2p, ZenohRouter };
+enum class TransportKind { Ros2Be, Ros2Mte, RawUdp, ZenohP2p, ZenohRouter, DdsUnicast };
 
 struct CliConfig {
   Role role{Role::A};

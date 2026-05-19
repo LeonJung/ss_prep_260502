@@ -19,6 +19,7 @@ IRQ pinning, etc.) are listed under TODO at the bottom.
 | **E1** | `raw_udp`  | bare AF_INET / SOCK_DGRAM. struct memcpy on the wire, no RTPS, no discovery, optional SO_BUSY_POLL / SO_RCVBUF / SO_SNDBUF / SCHED_FIFO |
 | **B7** | `zenoh_p2p`| same rclcpp+QoS as B1, but Zenoh session forced into **peer mode** (no central `rmw_zenohd` router). Both sides know each other's IP via `--peer-ip`, multicast scouting disabled. Requires `RMW_IMPLEMENTATION=rmw_zenoh_cpp`. |
 | **B8** | `zenoh_router` | same rclcpp+QoS as B1, but Zenoh session forced into **client mode** with explicit `--router-ip` pointing at a `rmw_zenohd` daemon. Operator must start `rmw_zenohd` separately. Scouting disabled. This is the explicit "canonical" rmw_zenoh router baseline used to quantify router-hop cost vs `zenoh_p2p`. Requires `RMW_IMPLEMENTATION=rmw_zenoh_cpp`. |
+| **T1-1** | `dds_unicast` | Tier-1 candidate: same rclcpp+QoS as B1 but the underlying RMW is pinned to **Fast DDS** with an XML profile that empties the metatraffic multicast list and adds an explicit `initialPeersList` entry for `--peer-ip`. Eliminates multicast discovery (which fails through the corp router) and forces a deterministic unicast discovery path. Requires `RMW_IMPLEMENTATION=rmw_fastrtps_cpp`. |
 
 The on-wire payload is exactly **1024 B** for every transport (24 B
 measurement header + 144 B q/qd/tau_ext + 856 B padding). The
@@ -51,6 +52,8 @@ usage: bench_{a,b}
        (zenoh_p2p only) --peer-ip IP [--zenoh-port 7447]
        (zenoh_router only) --router-ip IP [--zenoh-port 7447]
                           (operator must start rmw_zenohd separately)
+       (dds_unicast only) --peer-ip IP
+                          (requires RMW_IMPLEMENTATION=rmw_fastrtps_cpp)
 ```
 
 ### Example — same-host loopback sanity check
@@ -119,6 +122,35 @@ ros2 run comm_benchmark bench_b \
 Diff vs `zenoh_p2p`: traffic goes bench_a → rmw_zenohd → bench_b
 (two hops at the Zenoh layer instead of one). Use as the "before"
 number when judging if `zenoh_p2p` actually wins.
+
+### Example — `dds_unicast` across PC a↔d (Tier 1 candidate)
+
+First Tier-1 candidate: Fast DDS with explicit unicast `initialPeersList`,
+multicast metatraffic emptied. Eliminates the non-deterministic multicast
+discovery that fails through the corp router. The harness writes the XML
+profile to `/tmp` and sets `FASTRTPS_DEFAULT_PROFILES_FILE` before
+`rclcpp::init` — operator does not edit XML.
+
+```bash
+# (PC c) — abcd routing mode first
+bash ~/colcon_ws/src/comm_benchmark/network/pc_c_mode.sh abcd
+
+# (PC a) — bench_a, unicast peer = PC d
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh \
+     a dds_unicast 10.42.2.110 30 ~/bench_a_dds_unicast_abcd.csv
+
+# (PC d) — bench_b, unicast peer = PC a
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh \
+     b dds_unicast 10.42.0.141 30 ~/bench_d_dds_unicast_abcd.csv
+```
+
+`bench_one.sh` auto-forces `RMW_IMPLEMENTATION=rmw_fastrtps_cpp` for this
+transport (overriding the Zenoh default).
+
+Compare against `ros2_be` (default Zenoh) and `zenoh_router` on the same
+path to read off:
+- discovery determinism cost (mcast vs unicast)
+- RMW choice cost (Zenoh vs Fast DDS) at identical QoS
 
 ### Example — `zenoh_router` across PC a↔d (over WG tunnel)
 

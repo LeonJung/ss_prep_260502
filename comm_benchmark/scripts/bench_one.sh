@@ -9,8 +9,8 @@
 #   bash bench_one.sh <role> <transport> <peer-or-router-ip> [duration_sec] [csv_path]
 #
 #   role               : a | b      (default ports for raw_udp picked accordingly)
-#   transport          : ros2_be | ros2_mte | raw_udp | zenoh_p2p | zenoh_router
-#   peer-or-router-ip  : for raw_udp / zenoh_p2p : peer's IP
+#   transport          : ros2_be | ros2_mte | raw_udp | zenoh_p2p | zenoh_router | dds_unicast
+#   peer-or-router-ip  : for raw_udp / zenoh_p2p / dds_unicast : peer's IP
 #                        for zenoh_router       : host running rmw_zenohd
 #                        for ros2_be / ros2_mte : ignored (pass any token)
 #   duration           : optional, default 30
@@ -46,13 +46,19 @@ if [[ -z "$ROLE" || -z "$TRANSPORT" || -z "$PEER_IP" ]]; then
 fi
 case "$ROLE" in a|b) ;; *) echo "role must be a or b" >&2; exit 1 ;; esac
 case "$TRANSPORT" in
-  ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router) ;;
+  ros2_be|ros2_mte|raw_udp|zenoh_p2p|zenoh_router|dds_unicast) ;;
   *) echo "unknown transport: $TRANSPORT" >&2; exit 1 ;;
 esac
 
-# Default ROS env (caller can override before invoking)
+# Default ROS env (caller can override before invoking).
+# dds_unicast requires Fast DDS RMW to honor the XML profile we write;
+# other transports default to Zenoh as before.
 : "${ROS_DOMAIN_ID:=15}"
-: "${RMW_IMPLEMENTATION:=rmw_zenoh_cpp}"
+if [[ "$TRANSPORT" == "dds_unicast" ]]; then
+  : "${RMW_IMPLEMENTATION:=rmw_fastrtps_cpp}"
+else
+  : "${RMW_IMPLEMENTATION:=rmw_zenoh_cpp}"
+fi
 export ROS_DOMAIN_ID RMW_IMPLEMENTATION
 
 # Per-transport flags
@@ -74,6 +80,14 @@ case "$TRANSPORT" in
       echo ">>>          If the router is on a DIFFERENT host ($PEER_IP), this is fine — make sure it's running there." >&2
       echo ">>>          If the router was supposed to be on this host, start it first:" >&2
       echo ">>>            RMW_IMPLEMENTATION=rmw_zenoh_cpp ros2 run rmw_zenoh_cpp rmw_zenohd" >&2
+    fi
+    ;;
+  dds_unicast)
+    EXTRA="--peer-ip $PEER_IP"
+    if [[ "$RMW_IMPLEMENTATION" != "rmw_fastrtps_cpp" ]]; then
+      echo ">>> WARNING: RMW_IMPLEMENTATION=$RMW_IMPLEMENTATION but dds_unicast" >&2
+      echo ">>>          generates a Fast DDS XML profile. Forcing rmw_fastrtps_cpp." >&2
+      export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
     fi
     ;;
   *)
