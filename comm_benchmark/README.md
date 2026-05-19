@@ -120,6 +120,48 @@ Diff vs `zenoh_p2p`: traffic goes bench_a → rmw_zenohd → bench_b
 (two hops at the Zenoh layer instead of one). Use as the "before"
 number when judging if `zenoh_p2p` actually wins.
 
+### Example — `zenoh_router` across PC a↔d (over WG tunnel)
+
+For the canonical router-mode baseline measured on the **same path**
+the original 3 transports (raw_udp / ros2_be / ros2_mte) used —
+PC a ↔ PC b ↔ corp/WG ↔ PC c ↔ PC d. The router runs on PC a
+(simplest layout: bench_a is local to the router, bench_d is the
+only one paying the tunnel cost).
+
+```bash
+# (PC c) — flip routing to a↔d mode first
+#   This brings down the eno3np0 (e/f hub) NM connection and ensures
+#   `10.42.0.0/24 via 10.99.0.1 dev wg0` is installed.
+bash ~/colcon_ws/src/comm_benchmark/network/pc_c_mode.sh abcd
+
+# (PC a) — verify reachability
+ping -c 3 10.42.2.110
+
+# (PC a) — shell 1: start rmw_zenohd (leave running)
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ROS_DOMAIN_ID=15
+ros2 run rmw_zenoh_cpp rmw_zenohd
+
+# (PC a) — shell 2: bench_a, router = self
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh \
+     a zenoh_router 127.0.0.1 30 ~/bench_a_zenoh_router_abcd.csv
+
+# (PC d) — bench_b, router = PC a (over WG)
+bash ~/colcon_ws/src/comm_benchmark/scripts/bench_one.sh \
+     b zenoh_router 10.42.0.141 30 ~/bench_d_zenoh_router_abcd.csv
+```
+
+After collection, swap back if you still want to use the clean-LAN
+setup:
+
+```bash
+bash ~/colcon_ws/src/comm_benchmark/network/pc_c_mode.sh clean_lan
+```
+
+This `zenoh_router_abcd` number is the right "before" to compare
+against `zenoh_p2p_abcd` and the three already-measured transports
+on the same a↔d path.
+
 ### Single-shot runner — `scripts/bench_one.sh`
 
 For interactive A/B (no for-loop matrix), useful in clean LAN setups

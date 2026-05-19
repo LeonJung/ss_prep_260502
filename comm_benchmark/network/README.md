@@ -129,6 +129,38 @@ sudo wg-quick down wg0
 sudo systemctl enable wg-quick@wg0
 ```
 
+## PC c 모드 스위치 — `pc_c_mode.sh`
+
+PC c 가 두 벤치 시나리오에 동시에 등장 (e/f clean-LAN + a↔d WG) 하고,
+둘 다 `10.42.0.0/24` 를 쓰기 때문에 라우팅이 충돌. 모드 스위치 한 줄로
+전환:
+
+```bash
+# a↔d 벤치 (zenoh_router 등) 측정 시작 전
+bash network/pc_c_mode.sh abcd
+
+# 끝나고 e/f clean-LAN 으로 돌아갈 때
+bash network/pc_c_mode.sh clean_lan
+
+# 현재 상태만 확인
+bash network/pc_c_mode.sh status
+```
+
+스크립트가 하는 일:
+
+- **abcd 모드**: hub-facing NM 연결 (`eno3np0`) down → 그 위의 connected
+  route 가 wg0 경로를 shadowing 하던 문제 해소 → `10.42.0.0/24 via
+  10.99.0.1 dev wg0` 추가 → `ip_forward=1` 보장.
+- **clean_lan 모드**: wg0 경로 제거 → hub NM 연결 up → NM 의
+  `noprefixroute` 함정 (auto connected route 누락) 시 connected route 수동
+  재추가.
+- WG 터널 자체 (`wg0`) 는 양 모드 모두 살아있음 — 다시 띄울 필요 없음.
+
+기본 가정 (env 로 override 가능):
+- `HUB_IFACE=eno3np0` — e/f 가 붙은 iptime 허브 쪽 iface
+- `WG_IFACE=wg0`
+- `WG_GATEWAY=10.99.0.1` — b 의 WG IP
+
 ## Troubleshooting
 
 | 증상 | 원인 | 조치 |
