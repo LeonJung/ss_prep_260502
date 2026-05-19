@@ -31,6 +31,11 @@ HUB_IFACE="${HUB_IFACE:-eno3np0}"
 WG_IFACE="${WG_IFACE:-wg0}"
 WG_GATEWAY="${WG_GATEWAY:-10.99.0.1}"
 TARGET_NET="10.42.0.0/24"
+# d-direct iface (NM Shared to PC d). Used to locate the NM Shared
+# filter_forward chain (`nm-sh-fw-<iface>`) where the reject-by-default
+# rule lives — we need to insert wg0 ACCEPT before it so a↔d forwarding
+# survives. Override if the d-direct iface differs.
+D_IFACE="${D_IFACE:-enx9cebe8606e07}"
 
 show_status() {
   echo "--- 10.42.0.0/24 routes ---"
@@ -80,10 +85,36 @@ case "$MODE" in
     fi
 
     ensure_forward
+
+    # NM Shared on the d-direct iface installs an nft sub-chain
+    # `nm-sh-fw-<iface>` (newer NM, Ubuntu 24.04+) or
+    # `nm-shared-<iface>:filter_forward` (older NM) that the FORWARD
+    # chain jumps into. By default it rejects packets coming IN from
+    # any non-shared iface (e.g. wg0) — sending ICMP port-unreachable
+    # back to source. Without this, A→D forwarding silently fails.
+    NM_FW_CHAIN="nm-sh-fw-${D_IFACE}"
+    if sudo nft list chain ip filter "$NM_FW_CHAIN" >/dev/null 2>&1; then
+      # Already-inserted accepts are matched by counter-name only; just
+      # re-insert idempotently (duplicates are harmless and rare).
+      if ! sudo nft list chain ip filter "$NM_FW_CHAIN" 2>/dev/null \
+            | grep -q "iifname \"${WG_IFACE}\" .*accept"; then
+        echo ">>> inserting wg0 ACCEPT rules into ${NM_FW_CHAIN}"
+        sudo nft "insert rule ip filter $NM_FW_CHAIN iifname \"$WG_IFACE\" accept"
+        sudo nft "insert rule ip filter $NM_FW_CHAIN oifname \"$WG_IFACE\" accept"
+      fi
+    else
+      echo ">>> note: nft chain $NM_FW_CHAIN not found — NM filter_forward fix skipped"
+      echo ">>>       (only relevant if PC d-side filter_forward rejects wg0 traffic)"
+    fi
+
     echo
     show_status
     echo
     echo ">>> PC c now in a↔d mode. ping PC a from PC d (via PC c forward) should work."
+    echo ">>> NOTE: PC b also needs its NM Shared MASQUERADE bypassed for a↔d:"
+    echo ">>>   sudo nft 'insert rule ip nm-shared-<b-a-iface> nat_postrouting \\"
+    echo ">>>       ip saddr 10.42.0.0/24 ip daddr 10.42.2.0/24 return'"
+    echo ">>> (See network/README.md for full PC b/d runbook.)"
     ;;
 
   clean_lan)

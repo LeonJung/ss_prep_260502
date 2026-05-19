@@ -160,6 +160,31 @@ bash network/pc_c_mode.sh status
 - `HUB_IFACE=eno3np0` — e/f 가 붙은 iptime 허브 쪽 iface
 - `WG_IFACE=wg0`
 - `WG_GATEWAY=10.99.0.1` — b 의 WG IP
+- `D_IFACE=enx9cebe8606e07` — PC d 직결 iface (NM Shared `nm-sh-fw-<iface>` 위치)
+
+abcd 모드 진입 시 추가로 자동 적용:
+- NM Shared 의 `nm-sh-fw-<D_IFACE>` chain 에 `iifname "wg0" accept`,
+  `oifname "wg0" accept` 를 insert. 안 박혀있으면 A→D 패킷이 chain 의
+  default reject 에 걸려 ICMP port-unreachable 반사됨 (D→A 는 conntrack
+  established 로 통과해서 비대칭으로 보임).
+- chain 이름이 다른 NM 버전이면 (`nm-shared-<iface>:filter_forward`) 위
+  자동 fix 가 skip 되니까 직접 적용 필요. PC b 가 그 패턴.
+
+### PC b 측 보조 fix (manual)
+
+PC c 와 별개로 **PC b 의 NM Shared MASQUERADE 가 a→d 패킷의 src 를
+wg0 IP 로 NAT** 함. 이 NAT 가 걸리면 PC d 의 reply 가 10.99.0.1 으로
+가서 손실됨. 한 줄로 우회:
+
+```bash
+# (PC b) — chain 맨 앞에 RETURN 으로 a↔d 트래픽이 masquerade 룰 매치 전에 빠져나감
+sudo nft 'insert rule ip nm-shared-enx9cebe8ce7665 nat_postrouting \
+    ip saddr 10.42.0.0/24 ip daddr 10.42.2.0/24 return'
+```
+
+iface 이름이 다르면 (`sudo nft list tables` 로 확인) 맞게 박음.
+재부팅하면 휘발성 — 매번 재적용. 영구화하려면 NM dispatcher 스크립트나
+systemd unit 으로 부팅 시 자동 실행.
 
 ## Troubleshooting
 
